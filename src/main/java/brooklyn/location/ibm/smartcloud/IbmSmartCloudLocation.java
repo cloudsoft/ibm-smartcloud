@@ -5,11 +5,13 @@ import brooklyn.location.basic.SshMachineLocation;
 import brooklyn.location.cloud.AbstractCloudMachineProvisioningLocation;
 import brooklyn.util.MutableMap;
 import brooklyn.util.config.ConfigBag;
-import com.google.common.base.Optional;
+import brooklyn.util.internal.Repeater;
 import com.google.common.base.Predicate;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.io.Files;
 import com.ibm.cloud.api.rest.client.DeveloperCloud;
 import com.ibm.cloud.api.rest.client.DeveloperCloudClient;
 import com.ibm.cloud.api.rest.client.bean.Image;
@@ -17,18 +19,23 @@ import com.ibm.cloud.api.rest.client.bean.Instance;
 import com.ibm.cloud.api.rest.client.bean.InstanceType;
 import com.ibm.cloud.api.rest.client.bean.Key;
 import com.ibm.cloud.api.rest.client.bean.Location;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-
+import com.ibm.cloud.api.rest.client.exception.KeyExistsException;
+import com.ibm.cloud.api.rest.client.exception.KeyGenerationFailedException;
+import com.ibm.cloud.api.rest.client.exception.UnauthorizedUserException;
 import com.ibm.cloud.api.rest.client.exception.UnknownErrorException;
 import com.ibm.cloud.api.rest.client.exception.UnknownKeyException;
+import org.apache.commons.io.Charsets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
@@ -36,11 +43,8 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
 
    public static final Logger log = LoggerFactory.getLogger(IbmSmartCloudLocation.class);
 
-   public static final String LOCATION = "Raleigh";
-   private static final String IMAGE = "Red Hat Enterprise Linux 6.3 (32-bit)";
-   private static final String INSTANCE_TYPE_LABEL = "Copper 32 bit";
-
    private final Map<IbmSmartCloudSshMachineLocation, String> serverIds = Maps.newLinkedHashMap();
+   private final List<String> keyPairNames = Lists.newArrayList();
    private final DeveloperCloudClient client;
    private final ConfigBag setup;
 
@@ -71,49 +75,67 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
    }
 
    @Override
-   public SshMachineLocation obtain(Map<?, ?> flags) throws NoMachinesAvailableException {
-      String name = "brooklyn-ibm-smartcloud-" + Integer.toString(new Random().nextInt(Integer.MAX_VALUE));
-      String keyName = "brooklyn-key";
-      Location dataCenter = checkNotNull(findLocation(LOCATION), "location must not be null");
-      Image image = checkNotNull(findImage(IMAGE), "image must not be null");
-      String imageID = image.getID(); // "20025200", Red Hat Enterprise Linux 6.2 (32-bit)(RTP)
-      InstanceType instanceType = checkNotNull(findInstanceType(image.getID(), INSTANCE_TYPE_LABEL),
-              "instanceType must not be null");
-
+   public IbmSmartCloudSshMachineLocation obtain(Map<?, ?> flags) throws NoMachinesAvailableException {
+      String postfix = Integer.toString(new Random().nextInt(Integer.MAX_VALUE));
+      String name = name("brooklyn-instance" , postfix);
+      String keyName = name("brooklyn-key", postfix);
+      String dataCenterID = checkNotNull(findLocation(LOCATION), errorMessage("location")).getId();
+      String imageID = checkNotNull(findImage(IMAGE), errorMessage("image")).getID();
+      String instanceTypeID = checkNotNull(findInstanceType(imageID, INSTANCE_TYPE_LABEL), errorMessage("instanceType"))
+              .getId();
       try {
-         String dataCenterID = dataCenter.getId();
-         String instanceTypeID = instanceType.getId(); // "COP32.1/2048/60"; // Copper - 32 bit (vCPU: 1,
-         // RAM: 2 GiB,
-         // Disk: 60 GiB)
-
-         Key key;
-         try {
-            key = client.describeKey(keyName);
-         } catch (UnknownKeyException e) {
-            // The function generateKeyPair() will return the private key, as there is no way to
-            // retrieve the private key if we need it for ssh access it should be captured and stored here
-            key = client.generateKeyPair(keyName);
-         }
-
+         Key key = getKeyPairOrCreate(keyName);
+         String privateKeyPath = storePrivateKeyOnTempFile(keyName, key.getMaterial());
          List<Instance> instances = client.createInstance(name, dataCenterID, imageID, instanceTypeID, keyName, null);
          String serverId = Iterables.getOnlyElement(instances).getID();
-         Instance myInstance = client.describeInstance(serverId);
-         Instance.Status lastStatus = null, currentStatus;
-         while (Instance.Status.ACTIVE != (currentStatus = myInstance.getStatus())) {
-            if (lastStatus != currentStatus) {
-               lastStatus = currentStatus;
-               System.out.println(lastStatus);
-            }
-            Thread.sleep(1000 * 10); // sleep 10 seconds
-            myInstance = client.describeInstance(serverId);
-            // refetch the instance state
-         }
-         // Instance is now active.
-         System.out.println(currentStatus);
-         return registerIbmSmartCloudSshMachineLocation(myInstance.getIP(), serverId);
+         Instance instance = waitForInstanceRunning(serverId, 1, TimeUnit.MINUTES, 60);
+         return registerIbmSmartCloudSshMachineLocation(instance.getIP(), serverId);
       } catch (Exception e) {
          throw Throwables.propagate(e);
       }
+   }
+
+   private String storePrivateKeyOnTempFile(String keyName, String keyMaterial) throws IOException {
+      File privateKey = File.createTempFile(keyName, "_rsa");
+      Files.write(keyMaterial, privateKey, Charsets.UTF_8);
+      privateKey.setReadable(true, true);
+      privateKey.deleteOnExit();
+      keyPairNames.add(keyName);
+      return privateKey.getAbsolutePath();
+   }
+
+   private Key getKeyPairOrCreate(String keyName) throws IOException, UnauthorizedUserException, UnknownErrorException,
+           KeyExistsException, KeyGenerationFailedException {
+      try {
+         return client.describeKey(keyName);
+      } catch (UnknownKeyException e) {
+         return client.generateKeyPair(keyName);
+      }
+   }
+
+   private Instance waitForInstanceRunning(final String serverId, long duration, TimeUnit timeUnit, int maxIterations)
+           throws Exception {
+      boolean isRunning = Repeater.create("Wait until the instance is ready")
+              .until(new Callable<Boolean>() {
+                 public Boolean call() {
+                    Instance instance;
+                    try {
+                       instance = client.describeInstance(serverId);
+                    } catch (Exception e) {
+                       log.error(String.format("Cannot find instance with serverId(%s)", serverId), e);
+                       return false;
+                    }
+                    Instance.Status status = instance.getStatus();
+                    return Instance.Status.ACTIVE.equals(status) || Instance.Status.FAILED.equals(status);
+                 }
+              })
+              .every(duration, timeUnit)
+              .limitIterationsTo(maxIterations)
+              .run();
+      if(!isRunning) {
+         throw new RuntimeException("Instance is not running");
+      }
+      return client.describeInstance(serverId);
    }
 
    protected IbmSmartCloudSshMachineLocation registerIbmSmartCloudSshMachineLocation(String ipAddress, String serverId) {
@@ -137,20 +159,21 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
 
    @Override
    public void release(SshMachineLocation machine) {
-      /* // We can now perform other actions against the instance such as saving it
-      client.saveInstance(instanceID, "Saved Instance", "A description of my saved instance");
-      // Note: the system will not delete before the save is done
-      // Or deleting the instance
-      client.deleteInstance(instanceID);*/
       try {
          String serverIdMsg = String.format("Server ID for machine(%s) must not be null", machine.getName());
          String serverId = checkNotNull(serverIds.get(machine), serverIdMsg);
-         //String reason = String.format("Brooklyn released %s", machine.getName());
-         //client.saveInstance(serverId, "Saved Instance", reason);
-         // Note: the system will not delete before the save is done
          client.deleteInstance(serverId);
       } catch (Exception e) {
          throw Throwables.propagate(e);
+      } finally {
+         for(String keyName : keyPairNames) {
+            try {
+               client.removeKey(keyName);
+            } catch (Exception e) {
+               LOG.error("Cannot delete keypair({})", keyName);
+               throw Throwables.propagate(e);
+            }
+         }
       }
    }
 
@@ -194,5 +217,13 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
             return input.getLabel().contains(type);
          }
       })).orNull();
+   }
+
+   private String name(String prefix, String postfix) {
+      return String.format("%s-%s", prefix, postfix);
+   }
+
+   private String errorMessage(String entity) {
+      return String.format("%s must not be null" , entity);
    }
 }
