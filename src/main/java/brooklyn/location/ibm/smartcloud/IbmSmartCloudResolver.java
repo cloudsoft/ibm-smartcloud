@@ -10,7 +10,7 @@ import java.util.Map;
 
 public class IbmSmartCloudResolver implements RegistryLocationResolver {
 
-   public static final String IBM_SMARTCLOUD = "ibm-smarcloud";
+   public static final String IBM_SMARTCLOUD = "ibm-smartcloud";
 
    @Override
    public String getPrefix() {

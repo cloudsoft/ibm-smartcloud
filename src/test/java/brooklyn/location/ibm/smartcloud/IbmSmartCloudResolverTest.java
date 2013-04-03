@@ -10,12 +10,12 @@ import static org.testng.Assert.assertTrue;
 
 public class IbmSmartCloudResolverTest {
 
-   public static final Map<String, String> PROPS = MutableMap.of("brooklyn.enstratius.identity", "x",
-           "brooklyn.enstratius.credential", "y");
+   public static final Map<String, String> PROPS = MutableMap.of("brooklyn.ibm-smartcloud.identity", "x",
+           "brooklyn.ibm-smartcloud.credential", "y", "brooklyn.ibm-smartcloud.user", "idcuser");
 
    @Test
    public void testIbmSmartCloudLoads() {
-      assertTrue(LocationResolverTest.resolve(PROPS, "ibm-smartcloud:us-east-1:eu-west-1a") instanceof
+      assertTrue(LocationResolverTest.resolve(PROPS, "ibm-smartcloud") instanceof
               IbmSmartCloudLocation);
    }
 }

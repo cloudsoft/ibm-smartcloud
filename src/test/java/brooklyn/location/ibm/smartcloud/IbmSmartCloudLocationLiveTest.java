@@ -18,7 +18,6 @@ public class IbmSmartCloudLocationLiveTest {
 
    public static final Logger LOG = LoggerFactory.getLogger(IbmSmartCloudLocationLiveTest.class);
 
-   private String identity;
    private String credential;
    private String user;
    private IbmSmartCloudLocation location;
@@ -27,11 +26,11 @@ public class IbmSmartCloudLocationLiveTest {
 
    @BeforeClass
    void init() {
-      identity = checkNotNull(System.getProperty("identity"));
+      String identity = checkNotNull(System.getProperty("identity"));
       credential = checkNotNull(System.getProperty("credential"));
       user = checkNotNull(System.getProperty("user"));
       location = new IbmSmartCloudLocation(ImmutableMap.of("identity", identity, "credential",
-              credential));
+              credential, "user", user));
    }
 
    @Test
