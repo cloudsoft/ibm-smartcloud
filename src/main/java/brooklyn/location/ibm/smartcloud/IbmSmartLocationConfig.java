@@ -14,11 +14,9 @@ public interface IbmSmartLocationConfig extends CloudLocationConfig {
    public static final ConfigKey<String> INSTANCE_TYPE_LABEL = new StringConfigKey("instanceType",
            "Override the instanceType configured (default 'Copper')",
            "Copper");
-
    public static final ConfigKey<Long> PERIOD = new BasicConfigKey<Long>(Long.class,
            "period",
            "how long to wait between ssh loop iterations (default 30 seconds)", 30l);
-
    public static final ConfigKey<Integer> MAX_ITERATIONS = new BasicConfigKey<Integer>(Integer.class,
            "maxIterations",
            "how many ssh loop attempts (default 120 times)", 120);

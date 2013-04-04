@@ -100,10 +100,32 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
          String privateKeyPath = storePrivateKeyOnTempFile(keyName, key.getMaterial());
          List<Instance> instances = client.createInstance(name, dataCenterID, imageID, instanceTypeID, keyName, null);
          String serverId = Iterables.getOnlyElement(instances).getID();
-         Instance instance = waitForInstanceRunning(serverId, getPeriod(), TimeUnit.SECONDS, getMaxIterations());
+         Instance instance = waitForInstance(Instance.Status.ACTIVE, serverId, getPeriod(), TimeUnit.SECONDS,
+                 getMaxIterations());
          return registerIbmSmartCloudSshMachineLocation(instance.getIP(), serverId, privateKeyPath);
       } catch (Exception e) {
          throw Throwables.propagate(e);
+      }
+   }
+
+   @Override
+   public void release(SshMachineLocation machine) {
+      try {
+         String serverIdMsg = String.format("Server ID for machine(%s) must not be null", machine.getName());
+         String serverId = checkNotNull(serverIds.get(machine), serverIdMsg);
+         client.deleteInstance(serverId);
+         waitForInstance(Instance.Status.REMOVED, serverId, getPeriod(), TimeUnit.SECONDS, getMaxIterations());
+      } catch (Exception e) {
+         throw Throwables.propagate(e);
+      } finally {
+         for(String keyName : keyPairNames) {
+            try {
+               client.removeKey(keyName);
+            } catch (Exception e) {
+               LOG.error("Cannot delete keypair({})", keyName);
+               throw Throwables.propagate(e);
+            }
+         }
       }
    }
 
@@ -116,6 +138,8 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       return privateKey.getAbsolutePath();
    }
 
+
+
    private Key getKeyPairOrCreate(String keyName) throws IOException, UnauthorizedUserException, UnknownErrorException,
            KeyExistsException, KeyGenerationFailedException {
       try {
@@ -125,9 +149,9 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       }
    }
 
-   private Instance waitForInstanceRunning(final String serverId, long duration, TimeUnit timeUnit, int maxIterations)
-           throws Exception {
-      boolean isRunning = Repeater.create("Wait until the instance is ready")
+   private Instance waitForInstance(final Instance.Status desiredStatus, final String serverId, long duration,
+                                           TimeUnit timeUnit, int maxIterations) throws Exception {
+      boolean isInDesiredStatus = Repeater.create("Wait until the instance is ready")
               .until(new Callable<Boolean>() {
                  public Boolean call() {
                     Instance instance;
@@ -138,13 +162,13 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
                        return false;
                     }
                     Instance.Status status = instance.getStatus();
-                    return Instance.Status.ACTIVE.equals(status) || Instance.Status.FAILED.equals(status);
+                    return status.equals(desiredStatus) || Instance.Status.FAILED.equals(desiredStatus);
                  }
               })
               .every(duration, timeUnit)
               .limitIterationsTo(maxIterations)
               .run();
-      if(!isRunning) {
+      if(!isInDesiredStatus) {
          throw new RuntimeException("Instance is not running");
       }
       return client.describeInstance(serverId);
@@ -171,26 +195,6 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
               .put(USER, getUser())
               .put(PRIVATE_KEY_FILE, privateKeyPath)
               .build());
-   }
-
-   @Override
-   public void release(SshMachineLocation machine) {
-      try {
-         String serverIdMsg = String.format("Server ID for machine(%s) must not be null", machine.getName());
-         String serverId = checkNotNull(serverIds.get(machine), serverIdMsg);
-         client.deleteInstance(serverId);
-      } catch (Exception e) {
-         throw Throwables.propagate(e);
-      } finally {
-         for(String keyName : keyPairNames) {
-            try {
-               client.removeKey(keyName);
-            } catch (Exception e) {
-               LOG.error("Cannot delete keypair({})", keyName);
-               throw Throwables.propagate(e);
-            }
-         }
-      }
    }
 
    private Location findLocation(final String location) {

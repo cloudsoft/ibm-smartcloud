@@ -34,13 +34,6 @@ public class IbmSmartCloudResolver implements RegistryLocationResolver {
 
    protected IbmSmartCloudLocation newLocationFromString(String spec, LocationRegistry registry, Map properties,
                                              Map locationFlags) {
-      /*
-      EnstratiusSpecParser details = EnstratiusSpecParser.parse(spec, false);
-      if (registry!=null) properties.putAll(registry.getProperties());
-      properties.putAll(locationFlags);
-      properties.put(CLOUD_REGION_ID, details.region);
-      properties.put(CLOUD_DATACENTER, details.datacenter);
-      */
       return new IbmSmartCloudLocation(properties);
    }
 }
