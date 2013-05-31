@@ -1,11 +1,26 @@
 package brooklyn.location.ibm.smartcloud;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
+
+import org.apache.commons.io.Charsets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import brooklyn.location.NoMachinesAvailableException;
 import brooklyn.location.basic.SshMachineLocation;
 import brooklyn.location.cloud.AbstractCloudMachineProvisioningLocation;
 import brooklyn.util.MutableMap;
 import brooklyn.util.config.ConfigBag;
 import brooklyn.util.internal.Repeater;
+
 import com.google.common.base.Predicate;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
@@ -24,19 +39,6 @@ import com.ibm.cloud.api.rest.client.exception.KeyGenerationFailedException;
 import com.ibm.cloud.api.rest.client.exception.UnauthorizedUserException;
 import com.ibm.cloud.api.rest.client.exception.UnknownErrorException;
 import com.ibm.cloud.api.rest.client.exception.UnknownKeyException;
-import org.apache.commons.io.Charsets;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
-
-import static com.google.common.base.Preconditions.checkNotNull;
 
 public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocation implements IbmSmartLocationConfig {
 
@@ -86,15 +88,13 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       return getConfig(MAX_ITERATIONS);
    }
 
-   @Override
    public IbmSmartCloudSshMachineLocation obtain(Map<?, ?> flags) throws NoMachinesAvailableException {
       String postfix = Integer.toString(new Random().nextInt(Integer.MAX_VALUE));
       String name = name("brooklyn-instance" , postfix);
       String keyName = name("brooklyn-keypair" , postfix);
       String dataCenterID = checkNotNull(findLocation(getLocation()), errorMessage("location")).getId();
       String imageID = checkNotNull(findImage(getImage()), errorMessage("image")).getID();
-      String instanceTypeID = checkNotNull(findInstanceType(imageID, getInstanceType()), errorMessage("instanceType"))
-              .getId();
+      String instanceTypeID = checkNotNull(findInstanceType(imageID, getInstanceType()), errorMessage("instanceType")).getId();
       try {
          Key key = getKeyPairOrCreate(keyName);
          String privateKeyPath = storePrivateKeyOnTempFile(keyName, key.getMaterial());
@@ -108,7 +108,6 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       }
    }
 
-   @Override
    public void release(SshMachineLocation machine) {
       try {
          String serverIdMsg = String.format("Server ID for machine(%s) must not be null", machine.getName());
@@ -137,8 +136,6 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       keyPairNames.add(keyName);
       return privateKey.getAbsolutePath();
    }
-
-
 
    private Key getKeyPairOrCreate(String keyName) throws IOException, UnauthorizedUserException, UnknownErrorException,
            KeyExistsException, KeyGenerationFailedException {
@@ -174,12 +171,15 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       return client.describeInstance(serverId);
    }
 
-   protected IbmSmartCloudSshMachineLocation registerIbmSmartCloudSshMachineLocation(String ipAddress,
-                                                                                     String serverId,
-                                                                                     String privateKeyPath) {
-      IbmSmartCloudSshMachineLocation machine = createIbmSmartCloudSshMachineLocation(ipAddress, serverId,
-              privateKeyPath);
+   protected IbmSmartCloudSshMachineLocation registerIbmSmartCloudSshMachineLocation(String ipAddress, String serverId, String privateKeyPath) {
+      IbmSmartCloudSshMachineLocation machine = createIbmSmartCloudSshMachineLocation(ipAddress, serverId, privateKeyPath);
       machine.setParentLocation(this);
+      
+      if(machine.isSshable()) {
+          machine.run("sudo sed -i \"s/#Subsystem/Subsystem/\" /etc/ssh/sshd_config");
+          machine.run("sudo /etc/init.d/sshd restart");
+      }
+      
       serverIds.put(machine, serverId);
       return machine;
    }
@@ -211,18 +211,18 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       })).orNull();
    }
 
-   private Image findImage(final String image) {
+   private Image findImage(final String imageName) {
       List<Image> images;
       try {
          images = client.describeImages();
       } catch (Exception e) {
          throw Throwables.propagate(e);
       }
-      return checkNotNull(Iterables.tryFind(images, new Predicate<Image>() {
+      return Iterables.tryFind(images, new Predicate<Image>() {
          public boolean apply(Image input) {
-            return input.getName().contains(image);
+            return input.getName().contains(imageName);
          }
-      })).orNull();
+      }).orNull();
    }
 
    private InstanceType findInstanceType(String imageId, final String type) {
