@@ -7,10 +7,9 @@ import java.util.Map;
 import org.testng.annotations.Test;
 
 import brooklyn.location.Location;
-import brooklyn.location.basic.LocationResolverTest;
 import brooklyn.management.ManagementContext;
 import brooklyn.management.internal.LocalManagementContext;
-import brooklyn.util.MutableMap;
+import brooklyn.util.collections.MutableMap;
 
 public class IbmSmartCloudResolverTest {
 
