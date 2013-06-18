@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory;
 import brooklyn.location.NoMachinesAvailableException;
 import brooklyn.location.basic.SshMachineLocation;
 import brooklyn.location.cloud.AbstractCloudMachineProvisioningLocation;
-import brooklyn.util.MutableMap;
+import brooklyn.util.collections.MutableMap;
 import brooklyn.util.config.ConfigBag;
 import brooklyn.util.internal.Repeater;
 
@@ -134,7 +134,7 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
    private String storePrivateKeyOnTempFile(String keyName, String keyMaterial) throws IOException {
       File privateKey = File.createTempFile(keyName, "_rsa");
       Files.write(keyMaterial, privateKey, Charsets.UTF_8);
-      privateKey.setReadable(true, true);
+      Runtime.getRuntime().exec("chmod 400 " + privateKey.getAbsolutePath());
       privateKey.deleteOnExit();
       keyPairNames.add(keyName);
       return privateKey.getAbsolutePath();
