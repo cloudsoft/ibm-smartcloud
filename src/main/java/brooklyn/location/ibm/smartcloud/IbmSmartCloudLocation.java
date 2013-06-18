@@ -6,6 +6,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
@@ -21,6 +22,8 @@ import brooklyn.util.MutableMap;
 import brooklyn.util.config.ConfigBag;
 import brooklyn.util.internal.Repeater;
 
+import com.google.common.base.Optional;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
@@ -92,8 +95,8 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       String postfix = Integer.toString(new Random().nextInt(Integer.MAX_VALUE));
       String name = name("brooklyn-instance" , postfix);
       String keyName = name("brooklyn-keypair" , postfix);
-      String dataCenterID = checkNotNull(findLocation(getLocation()), errorMessage("location")).getId();
-      String imageID = checkNotNull(findImage(getImage()), errorMessage("image")).getID();
+      String dataCenterID = findLocation(Preconditions.checkNotNull(getLocation(), "location")).getId();
+      String imageID = findImage(Preconditions.checkNotNull(getImage(), "image"), dataCenterID).getID();
       String instanceTypeID = checkNotNull(findInstanceType(imageID, getInstanceType()), errorMessage("instanceType")).getId();
       try {
          Key key = getKeyPairOrCreate(keyName);
@@ -204,25 +207,44 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       } catch (Exception e) {
          throw Throwables.propagate(e);
       }
-      return checkNotNull(Iterables.tryFind(locations, new Predicate<Location>() {
+      Optional<Location> result = Iterables.tryFind(locations, new Predicate<Location>() {
          public boolean apply(Location input) {
             return input.getName().contains(location);
          }
-      })).orNull();
+      });
+      if (!result.isPresent()) {
+          log.warn("IBM SmartCloud unknown location "+location);
+          log.info("IBM SmartCloud locations ("+locations.size()+") are:");
+          for (Location l: locations) 
+              log.info("  "+l.getName()+" "+l.getLocation()+" "+l.getId());
+          throw new NoSuchElementException("Unknown IBM SmartCloud location "+location);
+      }
+      return result.get();
    }
 
-   private Image findImage(final String imageName) {
+   private Image findImage(final String imageName, final String dataCenterID) {
       List<Image> images;
       try {
          images = client.describeImages();
       } catch (Exception e) {
          throw Throwables.propagate(e);
       }
-      return Iterables.tryFind(images, new Predicate<Image>() {
+      Optional<Image> result = Iterables.tryFind(images, new Predicate<Image>() {
          public boolean apply(Image input) {
-            return input.getName().contains(imageName);
+            if (!input.getName().contains(imageName)) return false;
+            if (!input.getLocation().equals(dataCenterID)) return false;
+            return true;
          }
-      }).orNull();
+      });
+      
+      if (!result.isPresent()) {
+          log.warn("IBM SmartCloud unknown image "+imageName+" (in location "+dataCenterID+")");
+          log.info("IBM SmartCloud images ("+images.size()+") are:");
+          for (Image img: images) 
+              log.info("  "+img.getName()+" "+img.getLocation()+" "+img.getOwner()+" "+img.getID());
+          throw new NoSuchElementException("Unknown IBM SmartCloud image "+imageName);
+      }
+      return result.get();
    }
 
    private InstanceType findInstanceType(String imageId, final String type) {
