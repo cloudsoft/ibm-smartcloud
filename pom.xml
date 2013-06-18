@@ -54,10 +54,8 @@
 		</dependency>
 		<dependency>
 			<groupId>com.ibm.cloud.api</groupId>
-			<artifactId>java-rest-client</artifactId>
+			<artifactId>ibm-sce-java-rest-client</artifactId>
 			<version>2.1</version>
-			<scope>system</scope>
-			<systemPath>${project.basedir}/lib/java-rest-client-2.1.jar</systemPath>
 		</dependency>
 
 		<dependency>
@@ -80,6 +78,17 @@
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
+  
+    <repositories>
+        <!-- enable sonatype snapshots repo (only for snapshots) -->
+        <repository>
+            <id>sonatype-nexus-snapshots</id>
+            <name>Sonatype Nexus Snapshots</name>
+            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+            <releases> <enabled>false</enabled> </releases>
+            <snapshots> <enabled>true</enabled> </snapshots>
+        </repository>
+    </repositories>
   
     <profiles>
          <profile>
@@ -115,6 +124,7 @@
                     <plugin>
                         <artifactId>maven-jar-plugin</artifactId>
                         <inherited>true</inherited>
+                        <version>2.4</version>
                         <executions>
                             <execution>
                                 <id>test-jar-creation</id>
