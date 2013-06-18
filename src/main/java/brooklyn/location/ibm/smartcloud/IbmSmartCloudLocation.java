@@ -1,6 +1,8 @@
 package brooklyn.location.ibm.smartcloud;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,6 +23,7 @@ import brooklyn.location.cloud.AbstractCloudMachineProvisioningLocation;
 import brooklyn.util.collections.MutableMap;
 import brooklyn.util.config.ConfigBag;
 import brooklyn.util.internal.Repeater;
+import brooklyn.util.time.Time;
 
 import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
@@ -45,6 +48,7 @@ import com.ibm.cloud.api.rest.client.exception.UnknownKeyException;
 
 public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocation implements IbmSmartLocationConfig {
 
+   private static final long serialVersionUID = -828289137296787878L;
    public static final Logger log = LoggerFactory.getLogger(IbmSmartCloudLocation.class);
 
    private final Map<IbmSmartCloudSshMachineLocation, String> serverIds = Maps.newLinkedHashMap();
@@ -83,14 +87,6 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       return getConfig(INSTANCE_TYPE_LABEL);
    }
 
-   public Long getPeriod() {
-      return getConfig(PERIOD);
-   }
-
-   public Integer getMaxIterations() {
-      return getConfig(MAX_ITERATIONS);
-   }
-
    public IbmSmartCloudSshMachineLocation obtain(Map<?, ?> flags) throws NoMachinesAvailableException {
       String postfix = Integer.toString(new Random().nextInt(Integer.MAX_VALUE));
       String name = name("brooklyn-instance" , postfix);
@@ -103,8 +99,10 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
          String privateKeyPath = storePrivateKeyOnTempFile(keyName, key.getMaterial());
          List<Instance> instances = client.createInstance(name, dataCenterID, imageID, instanceTypeID, keyName, null);
          String serverId = Iterables.getOnlyElement(instances).getID();
-         Instance instance = waitForInstance(Instance.Status.ACTIVE, serverId, getPeriod(), TimeUnit.SECONDS,
-                 getMaxIterations());
+         Instance instance = waitForInstance(Instance.Status.ACTIVE, serverId, 
+                 getConfig(IbmSmartLocationConfig.CLIENT_POLL_TIMEOUT_MILLIS), 
+                 getConfig(IbmSmartLocationConfig.CLIENT_POLL_PERIOD_MILLIS) ); 
+         log.info("Using server-supplied private key for "+serverId+" ("+instance.getIP()+"): "+privateKeyPath);
          return registerIbmSmartCloudSshMachineLocation(instance.getIP(), serverId, privateKeyPath);
       } catch (Exception e) {
          throw Throwables.propagate(e);
@@ -113,10 +111,12 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
 
    public void release(SshMachineLocation machine) {
       try {
-         String serverIdMsg = String.format("Server ID for machine(%s) must not be null", machine.getName());
+         String serverIdMsg = String.format("Server ID for machine(%s) must not be null", machine.getDisplayName());
          String serverId = checkNotNull(serverIds.get(machine), serverIdMsg);
          client.deleteInstance(serverId);
-         waitForInstance(Instance.Status.REMOVED, serverId, getPeriod(), TimeUnit.SECONDS, getMaxIterations());
+         waitForInstance(Instance.Status.REMOVED, serverId, 
+                 getConfig(IbmSmartLocationConfig.CLIENT_POLL_TIMEOUT_MILLIS), 
+                 getConfig(IbmSmartLocationConfig.CLIENT_POLL_PERIOD_MILLIS));
       } catch (Exception e) {
          throw Throwables.propagate(e);
       } finally {
@@ -149,8 +149,8 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       }
    }
 
-   private Instance waitForInstance(final Instance.Status desiredStatus, final String serverId, long duration,
-                                           TimeUnit timeUnit, int maxIterations) throws Exception {
+   /** waits for the instance to be listed by the client; it is not necessarily sshable however */
+   private Instance waitForInstance(final Instance.Status desiredStatus, final String serverId, long timeoutMillis, long periodMillis) throws Exception {
       boolean isInDesiredStatus = Repeater.create("Wait until the instance is ready")
               .until(new Callable<Boolean>() {
                  public Boolean call() {
@@ -162,11 +162,12 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
                        return false;
                     }
                     Instance.Status status = instance.getStatus();
+                    log.debug("looking for IBM SCE server "+serverId+", status: "+status.name());
                     return status.equals(desiredStatus) || Instance.Status.FAILED.equals(desiredStatus);
                  }
               })
-              .every(duration, timeUnit)
-              .limitIterationsTo(maxIterations)
+              .every(periodMillis, TimeUnit.MILLISECONDS)
+              .limitTimeTo(timeoutMillis, TimeUnit.MILLISECONDS)
               .run();
       if(!isInDesiredStatus) {
          throw new RuntimeException("Instance is not running");
@@ -174,13 +175,45 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
       return client.describeInstance(serverId);
    }
 
+   protected void waitForSshable(final SshMachineLocation machine, long delayMs) {
+       LOG.info("Started VM in {}; waiting {} for it to be sshable on {}@{}",
+               new Object[] {
+                       setup.getDescription(),
+                       Time.makeTimeStringRounded(delayMs),
+                       machine.getUser(), machine.getAddress(), 
+               });
+       
+       boolean reachable = new Repeater()
+           .repeat()
+           .every(1,SECONDS)
+           .until(new Callable<Boolean>() {
+               public Boolean call() {
+                   return machine.isSshable();
+               }})
+           .limitTimeTo(delayMs, MILLISECONDS)
+           .run();
+
+       if (!reachable) {
+           throw new IllegalStateException("SSH failed for "+
+                   machine.getUser()+"@"+machine.getAddress()+" ("+setup.getDescription()+") after waiting "+
+                   Time.makeTimeStringRounded(delayMs));
+       }
+   }
+   
    protected IbmSmartCloudSshMachineLocation registerIbmSmartCloudSshMachineLocation(String ipAddress, String serverId, String privateKeyPath) {
       IbmSmartCloudSshMachineLocation machine = createIbmSmartCloudSshMachineLocation(ipAddress, serverId, privateKeyPath);
-      machine.setParentLocation(this);
+      machine.setParent(this);
       
-      if(machine.isSshable()) {
+      waitForSshable(machine, getConfig(IbmSmartLocationConfig.SSH_REACHABLE_TIMEOUT_MILLIS));
+      
+      if (getConfig(IbmSmartLocationConfig.SSHD_SUBSYSTEM_ENABLE)) {
+          log.debug(this+": machine "+ipAddress+" is sshable, enabling sshd subsystem section");
           machine.run("sudo sed -i \"s/#Subsystem/Subsystem/\" /etc/ssh/sshd_config");
           machine.run("sudo /etc/init.d/sshd restart");
+          // wait 30s for ssh to restart (overkill, but safety first; cloud is so slow it won't matter!)
+          Time.sleep(30*1000);
+      } else {
+          log.debug(this+": machine "+ipAddress+" is not yet sshable");
       }
       
       serverIds.put(machine, serverId);
