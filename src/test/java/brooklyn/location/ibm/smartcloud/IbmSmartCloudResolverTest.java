@@ -1,12 +1,16 @@
 package brooklyn.location.ibm.smartcloud;
 
-import brooklyn.location.basic.LocationResolverTest;
-import brooklyn.util.MutableMap;
-import org.testng.annotations.Test;
+import static org.testng.Assert.assertTrue;
 
 import java.util.Map;
 
-import static org.testng.Assert.assertTrue;
+import org.testng.annotations.Test;
+
+import brooklyn.location.Location;
+import brooklyn.location.basic.LocationResolverTest;
+import brooklyn.management.ManagementContext;
+import brooklyn.management.internal.LocalManagementContext;
+import brooklyn.util.MutableMap;
 
 public class IbmSmartCloudResolverTest {
 
@@ -15,7 +19,8 @@ public class IbmSmartCloudResolverTest {
 
    @Test
    public void testIbmSmartCloudLoads() {
-      assertTrue(LocationResolverTest.resolve(PROPS, "ibm-smartcloud") instanceof
-              IbmSmartCloudLocation);
+      ManagementContext managementContext = new LocalManagementContext();
+      Location l = managementContext.getLocationRegistry().resolve("ibm-smartcloud", PROPS);
+      assertTrue(l instanceof IbmSmartCloudLocation);
    }
 }
