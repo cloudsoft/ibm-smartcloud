@@ -2,13 +2,17 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
-	<groupId>io.cloudsoft.ibm-smartcloud</groupId>
+	<groupId>io.cloudsoft.amp.locations</groupId>
 	<artifactId>ibm-smartcloud</artifactId>
-	<version>1.0-SNAPSHOT</version>
+	<version>0.6.0-SNAPSHOT</version>
 
 	<properties>
 		<brooklyn.version>0.6.0-SNAPSHOT</brooklyn.version>
 		<testng.version>6.7</testng.version>
+        <surefire.version>2.13</surefire.version>
+    
+        <includedTestGroups />
+        <excludedTestGroups>Integration,Acceptance,Live,WIP</excludedTestGroups>
 	</properties>
 
 	<dependencies>
@@ -76,4 +80,56 @@
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
+  
+    <profiles>
+         <profile>
+            <id>Tests</id>
+            <activation>
+                <file> <exists>${basedir}/src/test</exists> </file>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>${surefire.version}</version>
+                        <configuration>
+                            <properties>
+                                <property>
+                                    <name>listener</name>
+                                    <value>brooklyn.test.LoggingVerboseReporter</value>
+                                </property>
+                            </properties>
+                            <enableAssertions>true</enableAssertions>
+                            <groups>${includedTestGroups}</groups>
+                            <excludedGroups>${excludedTestGroups}</excludedGroups>
+                            <testFailureIgnore>false</testFailureIgnore>
+                            <systemPropertyVariables>
+                                <verbose>-1</verbose>
+                                <net.sourceforge.cobertura.datafile>${project.build.directory}/cobertura/cobertura.ser</net.sourceforge.cobertura.datafile>
+                                <cobertura.user.java.nio>false</cobertura.user.java.nio>
+                            </systemPropertyVariables>
+                            <printSummary>true</printSummary>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <inherited>true</inherited>
+                        <executions>
+                            <execution>
+                                <id>test-jar-creation</id>
+                                <goals>
+                                    <goal>test-jar</goal>
+                                </goals>
+                                <configuration>
+                                    <forceCreation>true</forceCreation>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+        
 </project>
