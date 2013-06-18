@@ -1,5 +1,6 @@
 package brooklyn.location.ibm.smartcloud;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import brooklyn.location.Location;
@@ -30,6 +31,10 @@ public class IbmSmartCloudResolver implements RegistryLocationResolver {
 
    protected IbmSmartCloudLocation newLocationFromString(String spec, LocationRegistry registry, Map properties, 
            Map locationFlags) {
-      return new IbmSmartCloudLocation(properties);
+      Map tmpProperties = new LinkedHashMap();
+      if (registry!=null) tmpProperties.putAll(registry.getProperties());
+      tmpProperties.putAll(properties);
+      tmpProperties.putAll(locationFlags);
+      return new IbmSmartCloudLocation(tmpProperties);
    }
 }
