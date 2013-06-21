@@ -15,12 +15,18 @@ public interface IbmSmartLocationConfig extends CloudLocationConfig {
            "Copper");
    
    public static final ConfigKey<Long> CLIENT_POLL_TIMEOUT_MILLIS =
-           ConfigKeys.newLongConfigKey("sce.client.poll.timeout", "how long to wait for the machine to be known via the SCE client, in millis", 60*60*1000L);
+           ConfigKeys.newLongConfigKey("sce.client.poll.timeout", "how long to wait for the machine to be known via the SCE client, in millis", 90*60*1000L);
    public static final ConfigKey<Long> CLIENT_POLL_PERIOD_MILLIS =
-           ConfigKeys.newLongConfigKey("sce.client.poll.period", "how long to wait between ssh loop iterations (default 30 seconds)", 30L);
+           ConfigKeys.newLongConfigKey("sce.client.poll.period", "how long to wait between ssh loop iterations (default 30 seconds)", 30*1000L);
 
    public static final ConfigKey<Long> SSH_REACHABLE_TIMEOUT_MILLIS =
            ConfigKeys.newLongConfigKey("ssh.reachable.timeout", "how long to wait for the machine to be sshable, in millis", 5*60*1000L);
    public static final ConfigKey<Boolean> SSHD_SUBSYSTEM_ENABLE =
            ConfigKeys.newBooleanConfigKey("sshd.subsystem.enable", "whether to ssh and reconfigure ssh_config so Subsystem line is enabled", true);
+   
+   public static final ConfigKey<Boolean> SELINUX_DISABLED =
+           ConfigKeys.newBooleanConfigKey("selinux.disabled", "whether to disable SElinux", true);
+   
+   public static final ConfigKey<Integer> INSTANCE_CREATION_RETRIES = 
+           ConfigKeys.newIntegerConfigKey("instance.creation.retries", "how many retries to attempt to create a new instance (default 5 times)", 5);
 }
