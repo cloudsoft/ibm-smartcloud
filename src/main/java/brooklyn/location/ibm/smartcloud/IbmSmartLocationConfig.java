@@ -24,9 +24,13 @@ public interface IbmSmartLocationConfig extends CloudLocationConfig {
    public static final ConfigKey<Boolean> SSHD_SUBSYSTEM_ENABLE =
            ConfigKeys.newBooleanConfigKey("sshd.subsystem.enable", "whether to ssh and reconfigure ssh_config so Subsystem line is enabled", true);
    
-   public static final ConfigKey<Boolean> SELINUX_DISABLED =
-           ConfigKeys.newBooleanConfigKey("selinux.disabled", "whether to disable SElinux", true);
    
    public static final ConfigKey<Integer> INSTANCE_CREATION_RETRIES = 
            ConfigKeys.newIntegerConfigKey("instance.creation.retries", "how many retries to attempt to create a new instance (default 5 times)", 5);
+
+   public static final ConfigKey<Boolean> SELINUX_DISABLED =
+           ConfigKeys.newBooleanConfigKey("selinux.disabled", "whether to disable SElinux", false);
+   
+   public static final ConfigKey<Boolean> STOP_IPTABLES = 
+           ConfigKeys.newBooleanConfigKey("stop.iptables", "whether to stop iptables", false);
 }

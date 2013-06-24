@@ -249,7 +249,13 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
         } else {
             LOG.debug(this + ": machine " + ipAddress + " is not yet sshable");
         }
-
+        
+        // TODO remove it and use `Apply same securityGroups rules to iptables, if iptables is running on the node`
+        if (getConfig(IbmSmartLocationConfig.STOP_IPTABLES)) {
+            machine.run("sudo service iptables stop");
+            machine.run("sudo chkconfig iptables off");
+            Time.sleep(3 * 1000L);
+        }
         serverIds.put(machine, serverId);
         return machine;
     }
