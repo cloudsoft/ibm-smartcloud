@@ -53,16 +53,18 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
 
     private final Map<IbmSmartCloudSshMachineLocation, String> serverIds = Maps.newLinkedHashMap();
     private final List<String> keyPairNames = Lists.newArrayList();
-    private final DeveloperCloudClient client;
-    private final ConfigBag setup;
+    private volatile DeveloperCloudClient client;
 
-    public IbmSmartCloudLocation(Map<?, ?> conf) {
-        super(conf);
-        setup = ConfigBag.newInstanceExtending(getConfigBag(), conf);
-        client = DeveloperCloud.getClient();
-        client.setRemoteCredentials(getIdentity(), getCredential());
+    public IbmSmartCloudLocation() {
+       super(MutableMap.of());
     }
 
+    @Override
+    public void init() {
+       client = DeveloperCloud.getClient();
+       client.setRemoteCredentials(getIdentity(), getCredential());
+    }
+    
     public String getIdentity() {
         return getConfig(ACCESS_IDENTITY);
     }
@@ -213,7 +215,7 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
     }
 
     protected void waitForSshable(final SshMachineLocation machine, long delayMs) {
-        LOG.info("Started VM in {}; waiting {} for it to be sshable on {}@{}", new Object[] { setup.getDescription(),
+        LOG.info("Started VM in {}; waiting {} for it to be sshable on {}@{}", new Object[] { getRawLocalConfigBag().getDescription(),
                 Time.makeTimeStringRounded(delayMs), machine.getUser(), machine.getAddress(), });
 
         boolean reachable = new Repeater().repeat().every(1, SECONDS).until(new Callable<Boolean>() {
@@ -224,7 +226,7 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
 
         if (!reachable) {
             throw new IllegalStateException("SSH failed for " + machine.getUser() + "@" + machine.getAddress() + " ("
-                    + setup.getDescription() + ") after waiting " + Time.makeTimeStringRounded(delayMs));
+                    + getRawLocalConfigBag().getDescription() + ") after waiting " + Time.makeTimeStringRounded(delayMs));
         }
     }
 
@@ -264,7 +266,7 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
             String privateKeyPath) {
         if (LOG.isDebugEnabled())
             LOG.debug("creating IbmSmartCloudSshMachineLocation representation for {}@{}", new Object[] { getUser(),
-                    ipAddress, setup.getDescription() });
+                  ipAddress, getRawLocalConfigBag().getDescription() });
         return new IbmSmartCloudSshMachineLocation(MutableMap.builder().put("serverId", serverId)
                 .put("address", ipAddress).put("displayName", ipAddress).put(USER, getUser())
                 .put(PRIVATE_KEY_FILE, privateKeyPath).build());

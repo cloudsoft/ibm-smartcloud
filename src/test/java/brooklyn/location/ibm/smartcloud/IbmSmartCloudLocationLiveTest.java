@@ -1,19 +1,26 @@
 package brooklyn.location.ibm.smartcloud;
 
-import brooklyn.location.basic.SshMachineLocation;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.Test;
-
-import java.util.List;
-
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.testng.Assert.assertTrue;
 
-@Test(groups = {"Live"} )
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.testng.annotations.AfterClass;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.Test;
+
+import brooklyn.entity.basic.Entities;
+import brooklyn.location.LocationSpec;
+import brooklyn.location.basic.SshMachineLocation;
+import brooklyn.management.internal.LocalManagementContext;
+import brooklyn.util.exceptions.CompoundRuntimeException;
+
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
+
+@Test(groups = { "Live" })
 public class IbmSmartCloudLocationLiveTest {
 
    public static final Logger LOG = LoggerFactory.getLogger(IbmSmartCloudLocationLiveTest.class);
@@ -24,27 +31,32 @@ public class IbmSmartCloudLocationLiveTest {
 
    protected List<IbmSmartCloudSshMachineLocation> machines = Lists.newArrayList();
 
-   @BeforeClass
-   void init() {
+   private LocalManagementContext managementContext;
+
+   @BeforeClass(alwaysRun = true)
+   public void init() {
+      managementContext = new LocalManagementContext();
+      machines = Lists.newArrayList();
       String identity = checkNotNull(System.getProperty("identity"));
       credential = checkNotNull(System.getProperty("credential"));
       user = checkNotNull(System.getProperty("user"));
-      location = new IbmSmartCloudLocation(ImmutableMap.of("identity", identity, "credential",
-              credential, "user", user));
+      location = managementContext.getLocationManager().createLocation(
+            LocationSpec.spec(IbmSmartCloudLocation.class).configure("identity", identity)
+                  .configure("credential", credential).configure("user", user));
    }
 
    @Test
    public void testObtain() throws Exception {
       IbmSmartCloudSshMachineLocation machine = location.obtain(ImmutableMap.of("user", user));
+      machines.add(machine);
       LOG.info("Provisioned vm {}; checking if ssh'able", machine.toString());
       assertTrue(machine.isSshable());
-      machines.add(machine);
    }
 
-   @Test
+   @Test(dependsOnMethods="testObtain")
    public void testRelease() throws Exception {
       List<Exception> exceptions = Lists.newArrayList();
-      for(SshMachineLocation machine : machines) {
+      for (SshMachineLocation machine : machines) {
          try {
             location.release(machine);
          } catch (Exception e) {
@@ -56,5 +68,23 @@ public class IbmSmartCloudLocationLiveTest {
          throw exceptions.get(0);
       }
       machines.clear();
+   }
+   
+   @AfterClass(alwaysRun=true)
+   public void tearDown() {
+      List<Exception> exceptions = Lists.newArrayList();
+      for(SshMachineLocation machine : machines) {
+         try {
+            location.release(machine);
+         } catch (Exception e) {
+            LOG.error("Error releasing "+machine, e);
+            exceptions.add(e);
+         }
+      }
+      machines.clear();
+      if (managementContext != null) Entities.destroyAll(managementContext);
+      if (!exceptions.isEmpty()) {
+         throw new CompoundRuntimeException("Error releasing machine in "+location, exceptions);
+      }
    }
 }
