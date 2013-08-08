@@ -11,8 +11,8 @@
 		<testng.version>6.7</testng.version>
         <surefire.version>2.13</surefire.version>
     
-        <includedTestGroups />
-        <excludedTestGroups>Integration,Acceptance,Live,WIP</excludedTestGroups>
+        <includedTestGroups>Live</includedTestGroups>
+        <excludedTestGroups>Integration,Acceptance,WIP</excludedTestGroups>
 	</properties>
 
 	<dependencies>

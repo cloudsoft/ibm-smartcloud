@@ -8,8 +8,8 @@ public interface IbmSmartCloudConfig extends CloudLocationConfig {
    public static final ConfigKey<String> LOCATION = ConfigKeys.newStringConfigKey("location",
            "Override the location configured (default 'Raleigh')", "Raleigh");
    public static final ConfigKey<String> IMAGE = ConfigKeys.newStringConfigKey("image",
-           "Override the image configured (default 'Red Hat Enterprise Linux 6.4 (64-bit)(RTP)')",
-           "Red Hat Enterprise Linux 6.4 (64-bit)(RTP)");
+           "Override the image configured (default 'Red Hat Enterprise Linux 6.4 (64-bit)')",
+           "Red Hat Enterprise Linux 6.4 (64-bit)");
    public static final ConfigKey<String> INSTANCE_TYPE_LABEL = ConfigKeys.newStringConfigKey("instanceType",
            "Override the instanceType configured (default 'Copper')", "Copper");
    
