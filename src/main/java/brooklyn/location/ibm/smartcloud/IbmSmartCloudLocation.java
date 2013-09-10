@@ -309,11 +309,20 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
     private Location findLocation(final String location) {
         Preconditions.checkNotNull(location, "location must not be null");
         List<Location> locations;
-        try {
-            locations = client.describeLocations();
-        } catch (Exception e) {
-            throw Throwables.propagate(e);
+        
+        int retriesLeft = 10;
+        while (true) {
+            try {
+                locations = client.describeLocations();
+                break;
+            } catch (Exception e) {
+                retriesLeft--;
+                LOG.warn("Error reading IBM locations; retries left: "+retriesLeft+" ("+e+")");
+                if (retriesLeft<=0)
+                    throw Throwables.propagate(e);
+            }
         }
+        
         Optional<Location> result = Iterables.tryFind(locations, new Predicate<Location>() {
             public boolean apply(Location input) {
                 return input.getName().contains(location);
