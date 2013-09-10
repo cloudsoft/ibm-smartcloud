@@ -25,6 +25,7 @@ import brooklyn.util.collections.MutableMap;
 import brooklyn.util.internal.Repeater;
 import brooklyn.util.net.Urls;
 import brooklyn.util.text.Strings;
+import brooklyn.util.time.Duration;
 import brooklyn.util.time.Time;
 
 import com.google.common.base.Optional;
@@ -33,7 +34,6 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.io.Files;
 import com.ibm.cloud.api.rest.client.DeveloperCloud;
@@ -45,8 +45,6 @@ import com.ibm.cloud.api.rest.client.bean.Key;
 import com.ibm.cloud.api.rest.client.bean.Location;
 import com.ibm.cloud.api.rest.client.exception.InsufficientResourcesException;
 import com.ibm.cloud.api.rest.client.exception.InvalidConfigurationException;
-import com.ibm.cloud.api.rest.client.exception.KeyExistsException;
-import com.ibm.cloud.api.rest.client.exception.KeyGenerationFailedException;
 import com.ibm.cloud.api.rest.client.exception.PaymentRequiredException;
 import com.ibm.cloud.api.rest.client.exception.UnauthorizedUserException;
 import com.ibm.cloud.api.rest.client.exception.UnknownErrorException;
@@ -59,7 +57,7 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
     private static final long serialVersionUID = -828289137296787878L;
 
     private final Map<SshMachineLocation, String> serverIds = Maps.newLinkedHashMap();
-    private final List<String> keyPairNames = Lists.newArrayList();
+    private final Map<SshMachineLocation,String> keyPairsByLocation = MutableMap.of();
     private volatile DeveloperCloudClient client;
 
     public IbmSmartCloudLocation() {
@@ -104,14 +102,29 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
         String imageID = findImage(getImage(), dataCenterID).getID();
         String instanceTypeID = findInstanceType(imageID, getInstanceType()).getId();
         try {
-            Key key = getKeyPairOrCreate(keyName);
-            String privateKeyPath = storePrivateKeyOnTempFile(keyName, key.getMaterial());
+            Key key;
+            boolean createdKey = false;
+            try {
+                key = client.describeKey(keyName);
+            } catch (UnknownKeyException e) {
+                LOG.info("Creating new keyPair({})", keyName);
+                key = client.generateKeyPair(keyName);
+                createdKey = true;
+            }
+
+            String privateKeyPath = storePrivateKeyInTempFile(keyName, key.getMaterial());
             Instance instance = createInstanceWithRetryStrategy(
                     getConfig(IbmSmartLocationConfig.INSTANCE_CREATION_RETRIES), serverName, keyName, dataCenterID,
                     imageID, instanceTypeID);
             LOG.info("Using server-supplied private key for " + instance.getName() + " (" + instance.getIP() + "): "
                     + privateKeyPath);
-            return registerIbmSmartCloudSshMachineLocation(instance.getIP(), instance.getID(), privateKeyPath);
+            SshMachineLocation result = registerIbmSmartCloudSshMachineLocation(instance.getIP(), instance.getID(), privateKeyPath);
+            
+            if (createdKey)
+                keyPairsByLocation.put(result, keyName);
+            
+            return result;
+            
         } catch (Exception e) {
             LOG.error(String.format("Cannot obtain a new machine with serverName(%s), keyName(%s), dataCenterID(%s), " +
             		"imageID(%s), instanceTypeID(%s)", serverName, keyName, dataCenterID, imageID, instanceTypeID), e);
@@ -130,34 +143,26 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
         } catch (Exception e) {
             throw Throwables.propagate(e);
         } finally {
-            for (String keyName : keyPairNames) {
+            // delete the key if we created it for this machine
+            String keyName = keyPairsByLocation.get(machine);
+            if (keyName!=null) {
+                // get errors if we try to delete too soon; this may help
+                Time.sleep(Duration.FIVE_SECONDS);
                 try {
                     client.removeKey(keyName);
                 } catch (Exception e) {
                     LOG.error("Cannot delete keypair({})", keyName);
-                    throw Throwables.propagate(e);
                 }
             }
         }
     }
 
-    private String storePrivateKeyOnTempFile(String keyName, String keyMaterial) throws IOException {
+    private String storePrivateKeyInTempFile(String keyName, String keyMaterial) throws IOException {
         File privateKey = File.createTempFile(keyName, "_rsa");
         Files.write(keyMaterial, privateKey, Charsets.UTF_8);
         Runtime.getRuntime().exec("chmod 400 " + privateKey.getAbsolutePath());
         privateKey.deleteOnExit();
-        keyPairNames.add(keyName);
         return privateKey.getAbsolutePath();
-    }
-
-    private Key getKeyPairOrCreate(String keyName) throws IOException, UnauthorizedUserException,
-            UnknownErrorException, KeyExistsException, KeyGenerationFailedException {
-        try {
-            return client.describeKey(keyName);
-        } catch (UnknownKeyException e) {
-            LOG.info("Created new keyPair({})", keyName);
-            return client.generateKeyPair(keyName);
-        }
     }
 
     private Instance createInstanceWithRetryStrategy(int retries, String serverName, String keyName,
