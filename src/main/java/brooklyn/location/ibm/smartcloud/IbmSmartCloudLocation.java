@@ -6,6 +6,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -14,19 +15,23 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.io.Charsets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import brooklyn.location.NoMachinesAvailableException;
 import brooklyn.location.basic.SshMachineLocation;
 import brooklyn.location.cloud.AbstractCloudMachineProvisioningLocation;
 import brooklyn.util.collections.MutableMap;
-import brooklyn.util.config.ConfigBag;
 import brooklyn.util.internal.Repeater;
+import brooklyn.util.net.Urls;
+import brooklyn.util.text.Strings;
 import brooklyn.util.time.Time;
 
 import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -49,9 +54,11 @@ import com.ibm.cloud.api.rest.client.exception.UnknownKeyException;
 
 public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocation implements IbmSmartLocationConfig {
 
+    public static final Logger LOG = LoggerFactory.getLogger(IbmSmartCloudLocation.class);
+    
     private static final long serialVersionUID = -828289137296787878L;
 
-    private final Map<IbmSmartCloudSshMachineLocation, String> serverIds = Maps.newLinkedHashMap();
+    private final Map<SshMachineLocation, String> serverIds = Maps.newLinkedHashMap();
     private final List<String> keyPairNames = Lists.newArrayList();
     private volatile DeveloperCloudClient client;
 
@@ -89,7 +96,7 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
         return getConfig(INSTANCE_TYPE_LABEL);
     }
 
-    public IbmSmartCloudSshMachineLocation obtain(Map<?, ?> flags) throws NoMachinesAvailableException {
+    public SshMachineLocation obtain(Map<?, ?> flags) throws NoMachinesAvailableException {
         String postfix = Integer.toString(new Random().nextInt(Integer.MAX_VALUE));
         String serverName = name("brooklyn-instance", postfix);
         String keyName = name("brooklyn-keypair", postfix);
@@ -230,9 +237,9 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
         }
     }
 
-    protected IbmSmartCloudSshMachineLocation registerIbmSmartCloudSshMachineLocation(String ipAddress,
+    protected SshMachineLocation registerIbmSmartCloudSshMachineLocation(String ipAddress,
             String serverId, String privateKeyPath) {
-        IbmSmartCloudSshMachineLocation machine = createIbmSmartCloudSshMachineLocation(ipAddress, serverId,
+        SshMachineLocation machine = createIbmSmartCloudSshMachineLocation(ipAddress, serverId,
                 privateKeyPath);
         machine.setParent(this);
 
@@ -240,36 +247,63 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
 
         if (getConfig(IbmSmartLocationConfig.SSHD_SUBSYSTEM_ENABLE)) {
             LOG.debug(this + ": machine " + ipAddress + " is sshable, enabling sshd subsystem section");
-            machine.run("sudo sed -i \"s/#Subsystem/Subsystem/\" /etc/ssh/sshd_config");
-            machine.run("sudo /etc/init.d/sshd restart");
-
-            // TODO remove it and use `Apply same securityGroups rules to iptables, if iptables is running on the node`
-            machine.run("sudo service iptables stop");
-            machine.run("sudo chkconfig iptables off");
+            machine.execCommands("enabling sshd subsystem",
+                    ImmutableList.of(
+                            "sudo sed -i \"s/#Subsystem/Subsystem/\" /etc/ssh/sshd_config",
+                            "sudo /etc/init.d/sshd restart",
+                            
+                            // TODO remove this and use `Apply same securityGroups rules to iptables, if iptables is running on the node`
+                            "sudo service iptables stop",
+                            "sudo chkconfig iptables off"));
             // wait 30s for ssh to restart (overkill, but safety first; cloud is so slow it won't matter!)
             Time.sleep(30 * 1000L);
         } else {
             LOG.debug(this + ": machine " + ipAddress + " is not yet sshable");
         }
         
-        // TODO remove it and use `Apply same securityGroups rules to iptables, if iptables is running on the node`
+        if (getConfig(IbmSmartLocationConfig.INSTALL_LOCAL_AUTHORIZED_KEYS)) {
+            try {
+                File authKeys = new File(Urls.mergePaths(System.getProperty("user.home"), ".ssh/authorized_keys"));
+                if (authKeys.exists()) {
+                    String authKeysContents = Files.toString(authKeys, Charset.defaultCharset());
+                    String marker = "EOF_"+Strings.makeRandomId(8);
+                    machine.execCommands("updating authorized_keys",
+                            ImmutableList.of("cat >> ~/.ssh/authorized_keys << "+marker+"\n" +
+                                    ""+authKeysContents.trim()+"\n"+
+                                    marker+"\n"));
+                }
+            } catch (IOException e) {
+                LOG.warn("Error installing authorized_keys to "+this+": "+e);
+            }
+        }
+        
+        // TODO additional security / vulnerability fixes from cloudsoft-ibm-web project (spin / sydney)
+        
+        // TODO remove this (ip_tables) and use `Apply same securityGroups rules to iptables, if iptables is running on the node`
         if (getConfig(IbmSmartLocationConfig.STOP_IPTABLES)) {
-            machine.run("sudo service iptables stop");
-            machine.run("sudo chkconfig iptables off");
+            machine.execCommands("disabling iptables",
+                    ImmutableList.of(
+                        "sudo service iptables stop",
+                        "sudo chkconfig iptables off"));
             Time.sleep(3 * 1000L);
         }
         serverIds.put(machine, serverId);
         return machine;
     }
 
-    protected IbmSmartCloudSshMachineLocation createIbmSmartCloudSshMachineLocation(String ipAddress, String serverId,
+    protected SshMachineLocation createIbmSmartCloudSshMachineLocation(String ipAddress, String serverId,
             String privateKeyPath) {
         if (LOG.isDebugEnabled())
             LOG.debug("creating IbmSmartCloudSshMachineLocation representation for {}@{}", new Object[] { getUser(),
                   ipAddress, getRawLocalConfigBag().getDescription() });
-        return new IbmSmartCloudSshMachineLocation(MutableMap.builder().put("serverId", serverId)
+        
+        MutableMap<Object, Object> props = MutableMap.builder().put("serverId", serverId)
                 .put("address", ipAddress).put("displayName", ipAddress).put(USER, getUser())
-                .put(PRIVATE_KEY_FILE, privateKeyPath).build());
+                .put(PRIVATE_KEY_FILE, privateKeyPath).build();
+        if (getManagementContext()!=null)
+            return getManagementContext().getLocationManager().createLocation(props, SshMachineLocation.class);
+        else
+            return new SshMachineLocation(props);
     }
 
     private Location findLocation(final String location) {

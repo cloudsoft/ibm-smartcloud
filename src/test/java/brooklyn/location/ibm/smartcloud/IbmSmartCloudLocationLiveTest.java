@@ -15,9 +15,9 @@ import brooklyn.entity.basic.Entities;
 import brooklyn.location.LocationSpec;
 import brooklyn.location.basic.SshMachineLocation;
 import brooklyn.management.internal.LocalManagementContext;
+import brooklyn.util.collections.MutableMap;
 import brooklyn.util.exceptions.CompoundRuntimeException;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 
 @Test(groups = { "Live" })
@@ -25,11 +25,9 @@ public class IbmSmartCloudLocationLiveTest {
 
    public static final Logger LOG = LoggerFactory.getLogger(IbmSmartCloudLocationLiveTest.class);
 
-   private String credential;
-   private String user;
    private IbmSmartCloudLocation location;
 
-   protected List<IbmSmartCloudSshMachineLocation> machines = Lists.newArrayList();
+   protected List<SshMachineLocation> machines = Lists.newArrayList();
 
    private LocalManagementContext managementContext;
 
@@ -37,17 +35,22 @@ public class IbmSmartCloudLocationLiveTest {
    public void init() {
       managementContext = new LocalManagementContext();
       machines = Lists.newArrayList();
-      String identity = checkNotNull(System.getProperty("identity"));
-      credential = checkNotNull(System.getProperty("credential"));
-      user = checkNotNull(System.getProperty("user"));
-      location = managementContext.getLocationManager().createLocation(
-            LocationSpec.spec(IbmSmartCloudLocation.class).configure("identity", identity)
+      
+      location = (IbmSmartCloudLocation) managementContext.getLocationRegistry().resolveIfPossible("named:ibm-sce-test");
+      if (location==null) {
+          String identity = checkNotNull(System.getProperty("identity"), 
+                  "test requires either a named:ibm-sce-test location or system properties to connect");
+          String credential = checkNotNull(System.getProperty("credential"));
+          String user = checkNotNull(System.getProperty("user"));
+          location = managementContext.getLocationManager().createLocation(
+                  LocationSpec.create(IbmSmartCloudLocation.class).configure("identity", identity)
                   .configure("credential", credential).configure("user", user));
+      }
    }
 
    @Test
    public void testObtain() throws Exception {
-      IbmSmartCloudSshMachineLocation machine = location.obtain(ImmutableMap.of("user", user));
+      SshMachineLocation machine = location.obtain(MutableMap.of());
       machines.add(machine);
       LOG.info("Provisioned vm {}; checking if ssh'able", machine.toString());
       assertTrue(machine.isSshable());
