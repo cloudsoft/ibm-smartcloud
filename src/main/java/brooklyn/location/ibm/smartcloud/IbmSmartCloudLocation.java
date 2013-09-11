@@ -7,6 +7,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -309,6 +310,15 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
             return getManagementContext().getLocationManager().createLocation(props, SshMachineLocation.class);
         else
             return new SshMachineLocation(props);
+    }
+
+    @Override
+    public Map<String, Object> getProvisioningFlags(Collection<String> tags) {
+        // TODO if we want to support provisioning flags
+        if (tags.size() > 0) {
+            LOG.debug("Location {}, ignoring provisioning tags {}", this, tags);
+        }
+        return MutableMap.<String, Object>of();
     }
 
     private Location findLocation(final String location) {
