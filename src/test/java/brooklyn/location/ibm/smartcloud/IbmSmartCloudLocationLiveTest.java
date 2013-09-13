@@ -17,7 +17,9 @@ import brooklyn.location.basic.SshMachineLocation;
 import brooklyn.management.internal.LocalManagementContext;
 import brooklyn.util.collections.MutableMap;
 import brooklyn.util.exceptions.CompoundRuntimeException;
+import brooklyn.util.time.Time;
 
+import com.google.common.base.Stopwatch;
 import com.google.common.collect.Lists;
 
 @Test(groups = { "Live" })
@@ -50,9 +52,10 @@ public class IbmSmartCloudLocationLiveTest {
 
    @Test
    public void testObtain() throws Exception {
+      LOG.info("Provisioning in "+location);
       SshMachineLocation machine = location.obtain(MutableMap.of());
       machines.add(machine);
-      LOG.info("Provisioned vm {}; checking if ssh'able", machine.toString());
+      LOG.info("Provisioned VM {} in {}; checking if ssh'able", machine, location);
       assertTrue(machine.isSshable());
    }
 
@@ -90,4 +93,37 @@ public class IbmSmartCloudLocationLiveTest {
          throw new CompoundRuntimeException("Error releasing machine in "+location, exceptions);
       }
    }
+   
+    public void go(String locationName) throws Exception {
+        try {
+            managementContext = new LocalManagementContext();
+            location = (IbmSmartCloudLocation) managementContext.getLocationRegistry().resolve(locationName);
+            Stopwatch watch = new Stopwatch().start();
+            testObtain();
+            LOG.info(locationName+": obtain took "+Time.makeTimeStringRounded(watch));
+            testRelease();
+            LOG.info(locationName+": obtain and release took "+Time.makeTimeStringRounded(watch));
+        } finally {
+            tearDown();
+        }
+    }
+
+    public static Thread runInThread(final String locationName) {
+        Thread t = new Thread() {
+            @Override
+            public void run() {
+                try {
+                    new IbmSmartCloudLocationLiveTest().go(locationName);
+                } catch (Exception e) {
+                    LOG.warn(locationName+": FAILED: "+e, e);
+                }
+            }
+        };
+        t.start();
+        return t;
+    }
+    public static void main(String[] args) {
+        runInThread("named:ibm-sce-singapore");
+        runInThread("named:ibm-sce-germany");
+    }
 }

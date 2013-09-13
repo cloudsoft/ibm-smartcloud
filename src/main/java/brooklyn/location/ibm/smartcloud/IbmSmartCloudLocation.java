@@ -11,7 +11,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
@@ -22,7 +21,10 @@ import org.slf4j.LoggerFactory;
 import brooklyn.location.NoMachinesAvailableException;
 import brooklyn.location.basic.SshMachineLocation;
 import brooklyn.location.cloud.AbstractCloudMachineProvisioningLocation;
+import brooklyn.location.cloud.CloudMachineNamer;
 import brooklyn.util.collections.MutableMap;
+import brooklyn.util.config.ConfigBag;
+import brooklyn.util.exceptions.Exceptions;
 import brooklyn.util.internal.Repeater;
 import brooklyn.util.net.Urls;
 import brooklyn.util.text.Strings;
@@ -44,14 +46,9 @@ import com.ibm.cloud.api.rest.client.bean.Instance;
 import com.ibm.cloud.api.rest.client.bean.InstanceType;
 import com.ibm.cloud.api.rest.client.bean.Key;
 import com.ibm.cloud.api.rest.client.bean.Location;
-import com.ibm.cloud.api.rest.client.exception.InsufficientResourcesException;
-import com.ibm.cloud.api.rest.client.exception.InvalidConfigurationException;
-import com.ibm.cloud.api.rest.client.exception.PaymentRequiredException;
-import com.ibm.cloud.api.rest.client.exception.UnauthorizedUserException;
-import com.ibm.cloud.api.rest.client.exception.UnknownErrorException;
 import com.ibm.cloud.api.rest.client.exception.UnknownKeyException;
 
-public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocation implements IbmSmartLocationConfig {
+public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocation implements IbmSmartCloudConfig {
 
     public static final Logger LOG = LoggerFactory.getLogger(IbmSmartCloudLocation.class);
     
@@ -96,26 +93,32 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
     }
 
     public SshMachineLocation obtain(Map<?, ?> flags) throws NoMachinesAvailableException {
-        String postfix = Integer.toString(new Random().nextInt(Integer.MAX_VALUE));
-        String serverName = name("brooklyn-instance", postfix);
-        String keyName = name("brooklyn-keypair", postfix);
+        ConfigBag setup = ConfigBag.newInstanceExtending(getRawLocalConfigBag(), flags);
+        String serverName = new CloudMachineNamer(setup).
+                // TODO can we go higher?
+                lengthMaxPermittedForMachineName(31).
+                generateNewMachineUniqueName();
+        
         String dataCenterID = findLocation(getLocation()).getId();
         String imageID = findImage(getImage(), dataCenterID).getID();
         String instanceTypeID = findInstanceType(imageID, getInstanceType()).getId();
+        
+        String keyName = setup.get(IbmSmartCloudConfig.KEYPAIR_NAME);
+        if (keyName==null) keyName = serverName;
         try {
             Key key;
             boolean createdKey = false;
             try {
                 key = client.describeKey(keyName);
             } catch (UnknownKeyException e) {
-                LOG.info("Creating new keyPair({})", keyName);
+                LOG.debug("Creating new keyPair({}) for {}", keyName, serverName);
                 key = client.generateKeyPair(keyName);
                 createdKey = true;
             }
 
             String privateKeyPath = storePrivateKeyInTempFile(keyName, key.getMaterial());
             Instance instance = createInstanceWithRetryStrategy(
-                    getConfig(IbmSmartLocationConfig.INSTANCE_CREATION_RETRIES), serverName, keyName, dataCenterID,
+                    getConfig(IbmSmartCloudConfig.INSTANCE_CREATION_RETRIES), serverName, keyName, dataCenterID,
                     imageID, instanceTypeID);
             LOG.info("Using server-supplied private key for " + instance.getName() + " (" + instance.getIP() + "): "
                     + privateKeyPath);
@@ -139,8 +142,8 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
             String serverId = checkNotNull(serverIds.get(machine), serverIdMsg);
             client.deleteInstance(serverId);
             waitForInstance(Instance.Status.REMOVED, serverId,
-                    getConfig(IbmSmartLocationConfig.CLIENT_POLL_TIMEOUT_MILLIS),
-                    getConfig(IbmSmartLocationConfig.CLIENT_POLL_PERIOD_MILLIS));
+                    getConfig(IbmSmartCloudConfig.CLIENT_POLL_TIMEOUT_MILLIS),
+                    getConfig(IbmSmartCloudConfig.CLIENT_POLL_PERIOD_MILLIS));
         } catch (Exception e) {
             throw Throwables.propagate(e);
         } finally {
@@ -174,13 +177,13 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
         do {
             instance = createInstance(serverName + "_" + failures, dataCenterID, imageID,
                     instanceTypeID, keyName);
-            LOG.info("Created new instance: name({}), keyname({}), location({}), id({})", 
+            LOG.info("Creation requested for new SCE VM instance: name({}), keyname({}), location({}), id({}), now waiting", 
                     new Object[] { instance.getName(), instance.getKeyName(), 
                     client.describeLocation(instance.getLocation()).getName(), instance.getID() });
             try {
                 foundInstance = waitForInstance(Instance.Status.ACTIVE, instance.getID(),
-                        getConfig(IbmSmartLocationConfig.CLIENT_POLL_TIMEOUT_MILLIS),
-                        getConfig(IbmSmartLocationConfig.CLIENT_POLL_PERIOD_MILLIS));
+                        getConfig(IbmSmartCloudConfig.CLIENT_POLL_TIMEOUT_MILLIS),
+                        getConfig(IbmSmartCloudConfig.CLIENT_POLL_PERIOD_MILLIS));
             } catch (IllegalStateException e) {
                 failures++;
                 client.deleteInstance(instance.getID());
@@ -193,12 +196,13 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
         return client.describeInstance(instance.getID());
     }
     
-    private Instance createInstance(String serverName, String dataCenterID, String imageID, String instanceTypeID,
-            String keyName) throws InsufficientResourcesException, InvalidConfigurationException,
-            PaymentRequiredException, UnauthorizedUserException, UnknownErrorException, IOException {
-        List<Instance> instances = client.createInstance(serverName, dataCenterID, imageID, instanceTypeID, keyName,
-                null);
-        return Iterables.getOnlyElement(instances);
+    private Instance createInstance(String serverName, String dataCenterID, String imageID, String instanceTypeID, String keyName) {
+        try {
+            List<Instance> instances = client.createInstance(serverName, dataCenterID, imageID, instanceTypeID, keyName, null);
+            return Iterables.getOnlyElement(instances);
+        } catch (Exception e) {
+            throw Exceptions.propagate(e);
+        }
     }
 
     /**
@@ -213,12 +217,12 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
                 try {
                     instance = client.describeInstance(serverId);
                 } catch (Exception e) {
-                    LOG.error(String.format("Cannot find instance with serverId(%s)", serverId), e);
+                    LOG.warn(String.format("Cannot find instance with serverId(%s) (continuing to wait)", serverId)+": "+e);
                     return false;
                 }
                 Instance.Status status = instance.getStatus();
                 if (Instance.Status.FAILED.equals(desiredStatus)) {
-                    LOG.error(String.format("Instance with serverId(%s) has status=failed", serverId));
+                    LOG.warn(String.format("Instance with serverId(%s) has status=failed (throwing)", serverId));
                     throw new IllegalStateException("Instance " + instance.getName() + " has status=failed");
                 }
                 LOG.debug("looking for IBM SCE server " + serverId + ", status: " + status.name());
@@ -228,7 +232,8 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
     }
 
     protected void waitForSshable(final SshMachineLocation machine, long delayMs) {
-        LOG.info("Started VM in {}; waiting {} for it to be sshable on {}@{}", new Object[] { getRawLocalConfigBag().getDescription(),
+        LOG.info("Started VM {} in {}; waiting {} for it to be sshable on {}@{}", new Object[] { 
+                machine.getDisplayName(), this,
                 Time.makeTimeStringRounded(delayMs), machine.getUser(), machine.getAddress(), });
 
         boolean reachable = new Repeater().repeat().every(1, SECONDS).until(new Callable<Boolean>() {
@@ -249,9 +254,9 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
                 privateKeyPath);
         machine.setParent(this);
 
-        waitForSshable(machine, getConfig(IbmSmartLocationConfig.SSH_REACHABLE_TIMEOUT_MILLIS));
+        waitForSshable(machine, getConfig(IbmSmartCloudConfig.SSH_REACHABLE_TIMEOUT_MILLIS));
 
-        if (getConfig(IbmSmartLocationConfig.SSHD_SUBSYSTEM_ENABLE)) {
+        if (getConfig(IbmSmartCloudConfig.SSHD_SUBSYSTEM_ENABLE)) {
             LOG.debug(this + ": machine " + ipAddress + " is sshable, enabling sshd subsystem section");
             machine.execCommands("enabling sshd subsystem",
                     ImmutableList.of(
@@ -267,7 +272,7 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
             LOG.debug(this + ": machine " + ipAddress + " is not yet sshable");
         }
         
-        if (getConfig(IbmSmartLocationConfig.INSTALL_LOCAL_AUTHORIZED_KEYS)) {
+        if (getConfig(IbmSmartCloudConfig.INSTALL_LOCAL_AUTHORIZED_KEYS)) {
             try {
                 File authKeys = new File(Urls.mergePaths(System.getProperty("user.home"), ".ssh/authorized_keys"));
                 if (authKeys.exists()) {
@@ -286,7 +291,7 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
         // TODO additional security / vulnerability fixes from cloudsoft-ibm-web project (spin / sydney)
         
         // TODO remove this (ip_tables) and use `Apply same securityGroups rules to iptables, if iptables is running on the node`
-        if (getConfig(IbmSmartLocationConfig.STOP_IPTABLES)) {
+        if (getConfig(IbmSmartCloudConfig.STOP_IPTABLES)) {
             machine.execCommands("disabling iptables",
                     ImmutableList.of(
                         "sudo service iptables stop",
@@ -401,10 +406,6 @@ public class IbmSmartCloudLocation extends AbstractCloudMachineProvisioningLocat
             throw new NoSuchElementException("Unknown IBM SmartCloud instanceType " + instanceType);
         }
         return result.get();
-    }
-
-    private String name(String prefix, String postfix) {
-        return String.format("%s-%s", prefix, postfix);
     }
 
 }

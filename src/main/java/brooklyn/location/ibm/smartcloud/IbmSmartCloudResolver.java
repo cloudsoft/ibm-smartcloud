@@ -17,8 +17,6 @@ import brooklyn.management.ManagementContext;
 import brooklyn.util.collections.MutableMap;
 import brooklyn.util.config.ConfigBag;
 
-import com.google.common.collect.Maps;
-
 public class IbmSmartCloudResolver implements LocationResolver {
 
     private static final Logger log = LoggerFactory.getLogger(IbmSmartCloudResolver.class);
@@ -45,7 +43,6 @@ public class IbmSmartCloudResolver implements LocationResolver {
       return newLocationFromString(spec, null, properties, new MutableMap());
    }
 
-   @SuppressWarnings("unchecked")
    protected IbmSmartCloudLocation newLocationFromString(String spec, LocationRegistry registry, Map<?,?> properties, Map<?,?> locationFlags) {
        ConfigBag tmpProperties = ConfigBag.newInstance();
        if (registry!=null) tmpProperties.putAll(registry.getProperties());
