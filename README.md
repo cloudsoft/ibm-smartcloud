@@ -1,10 +1,8 @@
-ibm-smartcloud
---------------
+IBM SmartCloud Enterprise (Brooklyn Location)
+---------------------------------------------
 
 This project contains support for Brooklyn and Cloudsoft AMP to connect to the IBM SmartCloud Enterprise cloud
 (the pre-OpenStack edition).  
-
-This code and associated binaries are confidential and proprietary, to be distributed only under a commercial license from Cloudsoft.
 
 ### Settings
 
@@ -23,4 +21,9 @@ The following settings are also supported (and in the first two cases, recommend
 
 A simple `mvn clean install` will build the library and make it available (locally) to any project which uses it.
 
+================
 
+&copy; [Cloudsoft Corporation Ltd](http://www.cloudsoftcorp.com) 2013. All rights reserved.
+
+Use of this software is subject to the Cloudsoft EULA, provided in licence.txt and 
+at [http://www.cloudsoftcorp.com/cloudsoft-developer-license](http://www.cloudsoftcorp.com/cloudsoft-developer-license)
